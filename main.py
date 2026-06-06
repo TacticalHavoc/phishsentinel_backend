@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import joblib
-import numpy as np
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -65,14 +64,19 @@ try:
     model = joblib.load("XGBmodel.pkl")
     scaler = joblib.load("XGBscaler.pkl")
     encoder = joblib.load("XGBencoder.pkl")
+    print("✅ Model components loaded successfully")
 except Exception as e:
-    print(f"Error loading machine learning components: {e}")
+    print(f"❌ Error loading machine learning components: {e}")
+    model = None
+    scaler = None
+    encoder = None
+
 
 class URLInput(BaseModel):
     url: str
 
 
-# --- 2. CORE UTILITY LOGIC ---
+# --- 2. CORE UTILITY LOGIC (EXACT MATCH WITH CLI VERSION) ---
 def is_site_real(hostname):
     try:
         socket.gethostbyname(hostname)
@@ -84,9 +88,7 @@ def is_site_real(hostname):
 def expand_url(url):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(
-            url, allow_redirects=True, timeout=5, headers=headers
-        )
+        response = requests.get(url, allow_redirects=True, timeout=5, headers=headers)
         return response.url
     except:
         return url
@@ -99,9 +101,7 @@ def get_whois_features(domain):
         )
         registered = 1 if "Domain Name" in result else 0
         c_match = re.search(r"Creation Date:\s*(.+)", result)
-        e_match = re.search(
-            r"Expiry Date:\s*(.+)|Registry Expiry Date:\s*(.+)", result
-        )
+        e_match = re.search(r"Expiry Date:\s*(.+)|Registry Expiry Date:\s*(.+)", result)
 
         if not c_match or not e_match:
             return registered, 0, 0
@@ -119,14 +119,13 @@ def get_whois_features(domain):
         return 0, 0, 0
 
 
-# --- 3. PRODUCTION FEATURE EXTRACTION (FIXED) ---
+# --- 3. FEATURE EXTRACTION (EXACT COPY FROM CLI VERSION) ---
 def extract_features(input_url):
     try:
         is_shortened = (
             1
             if any(
-                s in input_url.lower()
-                for s in ["bit.ly", "t.co", "goo.gl", "tinyurl"]
+                s in input_url.lower() for s in ["bit.ly", "t.co", "goo.gl", "tinyurl"]
             )
             else 0
         )
@@ -135,9 +134,7 @@ def extract_features(input_url):
         parsed = urlparse(final_url)
         hostname = parsed.netloc
         path = parsed.path
-        domain = (
-            ".".join(hostname.split(".")[-2:]) if "." in hostname else hostname
-        )
+        domain = ".".join(hostname.split(".")[-2:]) if "." in hostname else hostname
         tld = hostname.split(".")[-1] if "." in hostname else ""
 
         try:
@@ -172,8 +169,7 @@ def extract_features(input_url):
             (
                 1
                 if any(
-                    final_url.lower().endswith(e)
-                    for e in ["php", "exe", "zip", "rar"]
+                    final_url.lower().endswith(e) for e in ["php", "exe", "zip", "rar"]
                 )
                 else 0
             ),
@@ -185,18 +181,25 @@ def extract_features(input_url):
             reg,
             reg_len,
             age,
-            1,  # dns_record - always 1 since we already verified DNS exists
-            int(final_url.lower().startswith("https")),  # FIXED: Convert bool to int explicitly
+            1,  # dns_record
+            final_url.lower().startswith("https"),  # Keep as boolean for now
         ]
-        return features
+        return features, final_url  # Return both like CLI version
     except Exception as e:
         print(f"Feature extraction error: {e}")
-        return [0] * 27
+        return [0] * 27, input_url
 
 
-# --- 4. FASTAPI APP ROUTE ---
+# --- 4. FASTAPI APP ROUTE (WITH EXACT CLI PREPROCESSING) ---
 @app.post("/predict")
 def predict(data: URLInput):
+    # Check if model components are loaded
+    if model is None or scaler is None or encoder is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model components not loaded. Please check model files.",
+        )
+
     url = data.url.strip()
     if not url.startswith("http"):
         url = "http://" + url
@@ -206,53 +209,85 @@ def predict(data: URLInput):
 
     # Immediately block domains lacking an active DNS structure
     if not exists:
-        return {"is_phishing": True, "confidence": 100.0}
+        return {"is_phishing": True, "confidence": 100.0, "message": f"Blocked: {msg}"}
 
     try:
-        # Extract features identically to your terminal workflow
-        raw_features = extract_features(url)
-        
-        # Debug output (optional - remove in production)
-        print(f"Feature 26 raw value: {raw_features[26]}, type: {type(raw_features[26])}")
-        
-        # Apply label encoder over the proper integer value
-        raw_features[26] = encoder.transform([raw_features[26]])[0]
-        
-        print(f"Feature 26 after encoding: {raw_features[26]}")
-        
-        # Build DataFrame structure, scale data matrix, and query model
-        df = pd.DataFrame([raw_features], columns=FEATURE_NAMES)
-        scaled_df = scaler.transform(df)
+        # Extract features EXACTLY like CLI version
+        raw_vals, final_destination = extract_features(url)
 
-        prediction = int(model.predict(scaled_df)[0])
-        probabilities = model.predict_proba(scaled_df)[0]
-        confidence = float(probabilities[prediction] * 100)
+        # Apply encoder EXACTLY like CLI version
+        raw_vals[26] = encoder.transform([raw_vals[26]])[0]
 
-        return {"is_phishing": prediction == 1, "confidence": confidence}
-        
+        # Create DataFrame EXACTLY like CLI version
+        input_df = pd.DataFrame([raw_vals], columns=FEATURE_NAMES)
+        scaled_data = scaler.transform(input_df)
+
+        # Wrap scaled data back into a DataFrame (like CLI version for consistency)
+        scaled_df = pd.DataFrame(scaled_data, columns=FEATURE_NAMES)
+
+        # Make prediction EXACTLY like CLI version
+        pred = model.predict(scaled_df)[0]
+        prob = model.predict_proba(scaled_df)[0]
+
+        # Convert numpy types to Python native types for JSON serialization
+        is_phishing = bool(pred == 1)  # FIXED: Convert numpy.bool to Python bool
+        confidence = float(
+            prob[pred] * 100
+        )  # Already float, but ensure it's Python float
+        result_label = "PHISHING" if is_phishing else "LEGITIMATE"
+
+        # Log details for debugging
+        print(f"\n{'=' * 50}")
+        print(f"URL: {url}")
+        print(f"Final destination: {final_destination}")
+        print(f"RESULT: {result_label}")
+        print(f"CONFIDENCE: {confidence:.2f}%")
+        print(f"{'=' * 50}\n")
+
+        return {
+            "is_phishing": is_phishing,  # FIXED: Now it's a Python bool
+            "confidence": confidence,
+            "final_url": final_destination,
+            "prediction_text": result_label,
+        }
+
     except Exception as e:
         print(f"Prediction error: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- 5. HEALTH CHECK ENDPOINT (OPTIONAL) ---
+# --- 5. HEALTH CHECK ENDPOINT ---
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "model_loaded": model is not None}
+    return {
+        "status": "healthy" if model is not None else "unhealthy",
+        "model_loaded": model is not None,
+        "scaler_loaded": scaler is not None,
+        "encoder_loaded": encoder is not None,
+    }
 
 
-# --- 6. ROOT ENDPOINT (OPTIONAL) ---
+# --- 6. ROOT ENDPOINT ---
 @app.get("/")
 def root():
     return {
-        "message": "Phishing Detection API",
+        "message": "Phishing Detection API (CLI-compatible version)",
         "endpoints": {
             "POST /predict": "Analyze a URL for phishing",
-            "GET /health": "Check API health"
-        }
+            "GET /health": "Check API health",
+        },
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    print("\n🚀 Starting Phishing Detection API (CLI-Compatible)...")
+    print("📡 Server running at http://0.0.0.0:8000")
+    print(
+        "🔍 Test with: curl -X POST http://localhost:8000/predict -H 'Content-Type: application/json' -d '{\"url\": \"https://example.com\"}'\n"
+    )
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
