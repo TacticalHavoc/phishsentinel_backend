@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 app = FastAPI()
 
-# Allows your Chrome Extension to communicate with this application safely
+# Allows your Chrome Extension to communicate with this script safely
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -186,7 +186,7 @@ def extract_features(input_url):
             reg_len,
             age,
             1,
-            final_url.lower().startswith("https"),  # Keeps the boolean type format your encoder expects
+            final_url.lower().startswith("https"),  # Returns raw native Boolean type for the encoder
         ]
         return features
     except:
@@ -211,7 +211,7 @@ def predict(data: URLInput):
         # 1. Extract raw feature matrix matching training structures exactly
         raw_vals = extract_features(url)
 
-        # 2. Match the exact type label mapping logic used in terminal execution
+        # 2. Match the exact boolean type label mapping logic used in terminal execution
         raw_vals[26] = encoder.transform([raw_vals[26]])[0]
 
         # 3. Shape data frames, scale, and pass into model
