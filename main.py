@@ -119,7 +119,7 @@ def get_whois_features(domain):
         return 0, 0, 0
 
 
-# --- 3. PRODUCTION FEATURE EXTRACTION ---
+# --- 3. PRODUCTION FEATURE EXTRACTION (FIXED) ---
 def extract_features(input_url):
     try:
         is_shortened = (
@@ -185,11 +185,12 @@ def extract_features(input_url):
             reg,
             reg_len,
             age,
-            1,
-            final_url.lower().startswith("https"),  # CRITICAL FIX: Evaluates as Python Boolean (True/False)
+            1,  # dns_record - always 1 since we already verified DNS exists
+            int(final_url.lower().startswith("https")),  # FIXED: Convert bool to int explicitly
         ]
         return features
-    except:
+    except Exception as e:
+        print(f"Feature extraction error: {e}")
         return [0] * 27
 
 
@@ -210,9 +211,14 @@ def predict(data: URLInput):
     try:
         # Extract features identically to your terminal workflow
         raw_features = extract_features(url)
-
-        # Apply your label encoder over the proper boolean index
+        
+        # Debug output (optional - remove in production)
+        print(f"Feature 26 raw value: {raw_features[26]}, type: {type(raw_features[26])}")
+        
+        # Apply label encoder over the proper integer value
         raw_features[26] = encoder.transform([raw_features[26]])[0]
+        
+        print(f"Feature 26 after encoding: {raw_features[26]}")
         
         # Build DataFrame structure, scale data matrix, and query model
         df = pd.DataFrame([raw_features], columns=FEATURE_NAMES)
@@ -225,4 +231,28 @@ def predict(data: URLInput):
         return {"is_phishing": prediction == 1, "confidence": confidence}
         
     except Exception as e:
+        print(f"Prediction error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- 5. HEALTH CHECK ENDPOINT (OPTIONAL) ---
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "model_loaded": model is not None}
+
+
+# --- 6. ROOT ENDPOINT (OPTIONAL) ---
+@app.get("/")
+def root():
+    return {
+        "message": "Phishing Detection API",
+        "endpoints": {
+            "POST /predict": "Analyze a URL for phishing",
+            "GET /health": "Check API health"
+        }
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
