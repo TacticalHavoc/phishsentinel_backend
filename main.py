@@ -1,18 +1,26 @@
 import re
+import socket
+import subprocess
 import warnings
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import joblib
+import numpy as np
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# Clean terminal and log output
 warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 app = FastAPI()
 
-# Allows your Chrome Extension to communicate with this script safely
+# Allows your Chrome Extension to communicate with this application safely
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,6 +29,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- 1. CONFIGURATION ---
 FEATURE_NAMES = [
     "length_url",
     "length_hostname",
@@ -52,83 +61,169 @@ FEATURE_NAMES = [
 ]
 
 # Load your ML model components
-model = joblib.load("XGBmodel.pkl")
-scaler = joblib.load("XGBscaler.pkl")
-encoder = joblib.load("XGBencoder.pkl")
-
+try:
+    model = joblib.load("XGBmodel.pkl")
+    scaler = joblib.load("XGBscaler.pkl")
+    encoder = joblib.load("XGBencoder.pkl")
+except Exception as e:
+    print(f"Error loading model files: {e}")
 
 class URLInput(BaseModel):
     url: str
 
 
-def extract_features(input_url):
-    # This is a simplified fallback feature extractor to keep things lightning fast in the cloud
+# --- 2. LOGIC FUNCTIONS (FROM ORIGINAL SCRIPT) ---
+def is_site_real(hostname):
     try:
-        parsed = urlparse(input_url)
-        hostname = parsed.netloc
-        path = parsed.path
-        tld = hostname.split(".")[-1] if "." in hostname else ""
+        socket.gethostbyname(hostname)
+        return True, "Verified"
+    except socket.gaierror:
+        return False, "No DNS record found (Domain does not exist)."
 
-        features = [
-            len(input_url),
-            len(hostname),
-            1 if re.match(r"\d+\.\d+", hostname) else 0,
-            input_url.count("-"),
-            input_url.count("."),
-            input_url.count("@"),
-            input_url.count("&"),
-            input_url.count("_"),
-            input_url.count("%"),
-            input_url.count("/"),
-            input_url.count(":"),
-            input_url.count(","),
-            parsed.port if parsed.port else 0,
-            1 if tld in path else 0,
-            1 if tld in hostname.split(".")[:-2] else 0,
+
+def expand_url(url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(
+            url, allow_redirects=True, timeout=5, headers=headers
+        )
+        return response.url
+    except:
+        return url
+
+
+def get_whois_features(domain):
+    try:
+        result = subprocess.check_output(["whois", domain], timeout=5).decode(
+            errors="ignore"
+        )
+        registered = 1 if "Domain Name" in result else 0
+        c_match = re.search(r"Creation Date:\s*(.+)", result)
+        e_match = re.search(
+            r"Expiry Date:\s*(.+)|Registry Expiry Date:\s*(.+)", result
+        )
+
+        if not c_match or not e_match:
+            return registered, 0, 0
+
+        created = datetime.strptime(c_match.group(1)[:10], "%Y-%m-%d").replace(
+            tzinfo=timezone.utc
+        )
+        expires = datetime.strptime(
+            (e_match.group(1) or e_match.group(2))[:10], "%Y-%m-%d"
+        ).replace(tzinfo=timezone.utc)
+        today = datetime.now(timezone.utc)
+
+        return registered, (expires - today).days, (today - created).days
+    except:
+        return 0, 0, 0
+
+
+# --- 3. FEATURE EXTRACTION (EXACT TERMINAL ALIGNMENT) ---
+def extract_features(input_url):
+    try:
+        is_shortened = (
             1
             if any(
-                s in input_url.lower() for s in ["bit.ly", "t.co", "goo.gl", "tinyurl"]
+                s in input_url.lower()
+                for s in ["bit.ly", "t.co", "goo.gl", "tinyurl"]
             )
-            else 0,
-            1
-            if any(input_url.lower().endswith(e) for e in ["php", "exe", "zip", "rar"])
-            else 0,
-            0,
-            0,  # Redirections set to baseline default
-            0,
-            0,
-            0,  # Page scraping set to baseline default
+            else 0
+        )
+
+        final_url = expand_url(input_url)
+        parsed = urlparse(final_url)
+        hostname = parsed.netloc
+        path = parsed.path
+        domain = (
+            ".".join(hostname.split(".")[-2:]) if "." in hostname else hostname
+        )
+        tld = hostname.split(".")[-1] if "." in hostname else ""
+
+        try:
+            res = requests.get(
+                final_url, timeout=4, headers={"User-Agent": "Mozilla/5.0"}
+            )
+            html, redirects = res.text, len(res.history)
+            ext_redirect = 1 if urlparse(res.url).netloc != hostname else 0
+        except:
+            html, redirects, ext_redirect = "", 0, 0
+
+        soup = BeautifulSoup(html, "html.parser")
+        reg, reg_len, age = get_whois_features(domain)
+
+        features = [
+            len(final_url),
+            len(hostname),
+            (1 if re.match(r"\d+\.\d+", hostname) else 0),
+            final_url.count("-"),
+            final_url.count("."),
+            final_url.count("@"),
+            final_url.count("&"),
+            final_url.count("_"),
+            final_url.count("%"),
+            final_url.count("/"),
+            final_url.count(":"),
+            final_url.count(","),
+            (parsed.port if parsed.port else 0),
+            (1 if tld in path else 0),
+            (1 if tld in hostname.split(".")[:-2] else 0),
+            is_shortened,
+            (
+                1
+                if any(
+                    final_url.lower().endswith(e)
+                    for e in ["php", "exe", "zip", "rar"]
+                )
+                else 0
+            ),
+            redirects,
+            ext_redirect,
+            (1 if soup.find_all("form") else 0),
+            (1 if soup.find_all("iframe") else 0),
+            (1 if "copyright" in html.lower() else 0),
+            reg,
+            reg_len,
+            age,
             1,
-            365,
-            365,  # WHOIS defaults to prevent cloud crashes
-            1,
-            1 if input_url.lower().startswith("https") else 0,
+            final_url.lower().startswith("https"),  # Keeps the boolean type format your encoder expects
         ]
         return features
     except:
         return [0] * 27
 
 
+# --- 4. ENDPOINT FOR PREDICTION ---
 @app.post("/predict")
 def predict(data: URLInput):
     url = data.url.strip()
     if not url.startswith("http"):
         url = "http://" + url
 
-    # 1. Extract Features
-    raw_features = extract_features(url)
+    initial_host = urlparse(url).netloc
+    exists, msg = is_site_real(initial_host)
+
+    # Fast-track dead/unregistered malicious targets
+    if not exists:
+        return {"is_phishing": True, "confidence": 100.0}
 
     try:
-        # 2. Transform input features using your trained encoder and scaler
-        raw_features[26] = encoder.transform([raw_features[26]])[0]
-        df = pd.DataFrame([raw_features], columns=FEATURE_NAMES)
-        scaled_df = scaler.transform(df)
+        # 1. Extract raw feature matrix matching training structures exactly
+        raw_vals = extract_features(url)
 
-        # 3. Model Predict
+        # 2. Match the exact type label mapping logic used in terminal execution
+        raw_vals[26] = encoder.transform([raw_vals[26]])[0]
+
+        # 3. Shape data frames, scale, and pass into model
+        input_df = pd.DataFrame([raw_vals], columns=FEATURE_NAMES)
+        scaled_data = scaler.transform(input_df)
+        scaled_df = pd.DataFrame(scaled_data, columns=FEATURE_NAMES)
+
         prediction = int(model.predict(scaled_df)[0])
         probabilities = model.predict_proba(scaled_df)[0]
         confidence = float(probabilities[prediction] * 100)
 
         return {"is_phishing": prediction == 1, "confidence": confidence}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
