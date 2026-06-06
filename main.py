@@ -10,9 +10,9 @@ import joblib
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 # Setup logging
 logging.basicConfig(
@@ -205,7 +205,7 @@ def extract_features(input_url):
         return [0] * 27, input_url
 
 
-# --- 4. FASTAPI APP ROUTE ---
+# --- 4. FASTAPI APP ROUTE (FIXED CONFIDENCE CALCULATION) ---
 @app.post("/predict")
 def predict(data: URLInput):
     # Check if model components are loaded
@@ -259,12 +259,19 @@ def predict(data: URLInput):
 
         # Convert numpy types to Python native types
         raw_is_phishing = bool(pred == 1)
-        raw_confidence = float(prob[pred] * 100)
+        raw_confidence = float(prob[pred] * 100)  # Model's confidence in its prediction
         
-        # Apply threshold to reduce false positives
-        final_is_phishing = raw_is_phishing and raw_confidence > PHISHING_THRESHOLD
-        final_confidence = raw_confidence if final_is_phishing else (100.0 - raw_confidence)
-        result_label = "PHISHING" if final_is_phishing else "LEGITIMATE"
+        # FIXED: Apply threshold correctly WITHOUT inverting confidence
+        if raw_is_phishing:
+            # Model thinks it's phishing
+            final_is_phishing = raw_confidence > PHISHING_THRESHOLD
+            final_confidence = raw_confidence  # Confidence in PHISHING verdict
+            result_label = "PHISHING" if final_is_phishing else "LEGITIMATE"
+        else:
+            # Model thinks it's legitimate
+            final_is_phishing = False
+            final_confidence = raw_confidence  # Confidence in LEGITIMATE verdict (NOT inverted!)
+            result_label = "LEGITIMATE"
         
         # Comprehensive logging
         logger.info(f"{'='*60}")
@@ -340,8 +347,8 @@ def health_check():
 @app.get("/")
 def root():
     return {
-        "message": "Phishing Detection API (Production Ready)",
-        "version": "2.0.0",
+        "message": "Phishing Detection API (Production Ready - Fixed Confidence)",
+        "version": "2.1.0",
         "threshold": PHISHING_THRESHOLD,
         "endpoints": {
             "POST /predict": "Analyze a URL for phishing",
@@ -350,8 +357,9 @@ def root():
         },
         "response_fields": {
             "is_phishing": "Boolean indicating if URL is phishing",
-            "confidence": "Confidence percentage (0-100)",
+            "confidence": "Confidence in the final prediction (0-100%)",
             "raw_confidence": "Raw model confidence before threshold",
+            "raw_prediction": "Model's raw prediction before threshold",
             "prediction_text": "Human readable result (PHISHING/LEGITIMATE)",
             "threshold_applied": "Confidence threshold used"
         }
