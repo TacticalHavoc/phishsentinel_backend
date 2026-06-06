@@ -14,13 +14,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Clean terminal and log output
+# Clean terminal and cloud log output
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 app = FastAPI()
 
-# Allows your Chrome Extension to communicate with this script safely
+# Enable clean cross-origin requests for the Chrome Extension
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -60,19 +60,19 @@ FEATURE_NAMES = [
     "has_https",
 ]
 
-# Load your ML model components
+# Load original model pieces
 try:
     model = joblib.load("XGBmodel.pkl")
     scaler = joblib.load("XGBscaler.pkl")
     encoder = joblib.load("XGBencoder.pkl")
 except Exception as e:
-    print(f"Error loading model files: {e}")
+    print(f"Error loading machine learning components: {e}")
 
 class URLInput(BaseModel):
     url: str
 
 
-# --- 2. LOGIC FUNCTIONS (FROM ORIGINAL SCRIPT) ---
+# --- 2. CORE UTILITY LOGIC ---
 def is_site_real(hostname):
     try:
         socket.gethostbyname(hostname)
@@ -119,7 +119,7 @@ def get_whois_features(domain):
         return 0, 0, 0
 
 
-# --- 3. FEATURE EXTRACTION (EXACT TERMINAL ALIGNMENT) ---
+# --- 3. PRODUCTION FEATURE EXTRACTION ---
 def extract_features(input_url):
     try:
         is_shortened = (
@@ -186,14 +186,14 @@ def extract_features(input_url):
             reg_len,
             age,
             1,
-            final_url.lower().startswith("https"),  # Returns raw native Boolean type for the encoder
+            final_url.lower().startswith("https"),  # CRITICAL FIX: Evaluates as Python Boolean (True/False)
         ]
         return features
     except:
         return [0] * 27
 
 
-# --- 4. ENDPOINT FOR PREDICTION ---
+# --- 4. FASTAPI APP ROUTE ---
 @app.post("/predict")
 def predict(data: URLInput):
     url = data.url.strip()
@@ -203,27 +203,26 @@ def predict(data: URLInput):
     initial_host = urlparse(url).netloc
     exists, msg = is_site_real(initial_host)
 
-    # Fast-track dead/unregistered malicious targets
+    # Immediately block domains lacking an active DNS structure
     if not exists:
         return {"is_phishing": True, "confidence": 100.0}
 
     try:
-        # 1. Extract raw feature matrix matching training structures exactly
-        raw_vals = extract_features(url)
+        # Extract features identically to your terminal workflow
+        raw_features = extract_features(url)
 
-        # 2. Match the exact boolean type label mapping logic used in terminal execution
-        raw_vals[26] = encoder.transform([raw_vals[26]])[0]
-
-        # 3. Shape data frames, scale, and pass into model
-        input_df = pd.DataFrame([raw_vals], columns=FEATURE_NAMES)
-        scaled_data = scaler.transform(input_df)
-        scaled_df = pd.DataFrame(scaled_data, columns=FEATURE_NAMES)
+        # Apply your label encoder over the proper boolean index
+        raw_features[26] = encoder.transform([raw_features[26]])[0]
+        
+        # Build DataFrame structure, scale data matrix, and query model
+        df = pd.DataFrame([raw_features], columns=FEATURE_NAMES)
+        scaled_df = scaler.transform(df)
 
         prediction = int(model.predict(scaled_df)[0])
         probabilities = model.predict_proba(scaled_df)[0]
         confidence = float(probabilities[prediction] * 100)
 
         return {"is_phishing": prediction == 1, "confidence": confidence}
-
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
