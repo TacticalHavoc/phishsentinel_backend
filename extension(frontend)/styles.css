@@ -1,0 +1,114 @@
+/* Nihilism-style card for PhishSentinel - Compact Version */
+.chrome-link-card {
+  position: absolute;
+  width: 260px;  /* Reduced from 320px */
+  background: #fff;
+  border: 4px solid #000;  /* Reduced from 6px */
+  box-shadow: 8px 8px 0 #000;  /* Reduced from 12px */
+  transform: rotate(-1deg);
+  transition: all 0.3s ease;
+  z-index: 100000;
+  font-family: "Proxima Nova", "Segoe UI", Arial, sans-serif;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chrome-link-card:hover {
+  transform: rotate(0deg) scale(1.02);
+  box-shadow: 10px 10px 0 #000;
+}
+
+/* Banner styling - static, no hover effects */
+.card-banner {
+  background: #000;
+  color: #fff;
+  padding: 6px;  /* Reduced from 8px */
+  text-align: center;
+  font-weight: bold;
+  font-size: 11px;  /* Reduced from 14px */
+  letter-spacing: 1px;  /* Reduced from 2px */
+  height: 28px;  /* Reduced from 36px */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.banner-text {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+/* Card content */
+.card-content {
+  padding: 10px;  /* Reduced from 16px */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;  /* Reduced from 12px */
+}
+
+.card-text {
+  color: #333;
+  word-break: break-word;
+  font-size: 11px;  /* Reduced from 12px */
+  line-height: 1.4;  /* Reduced from 1.5 */
+  font-weight: 500;
+}
+
+.card-btn {
+  border: 3px solid #000;  /* Reduced from 4px */
+  background: #000;
+  color: #fff;
+  padding: 6px;  /* Reduced from 10px */
+  font-size: 11px;  /* Reduced from 13px */
+  font-weight: bold;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: inherit;
+  width: 100%;
+}
+
+.card-btn:hover {
+  background: #fff;
+  color: #000;
+  transform: translateY(-2px);  /* Reduced from -3px */
+  box-shadow: 0 2px 0 #000;  /* Reduced from 0 3px 0 #000 */
+}
+
+.card-btn:active {
+  animation: shake 0.3s ease-in-out;
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.card-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Shake animation */
+@keyframes shake {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }  /* Reduced from -3px */
+  50% { transform: translateX(2px); }   /* Reduced from 3px */
+  75% { transform: translateX(-2px); }  /* Reduced from -3px */
+  100% { transform: translateX(0); }
+}
+
+/* Result styles inside card-text */
+.card-text strong {
+  display: block;
+  margin-bottom: 3px;  /* Reduced from 4px */
+}
+
+/* Style for results to fit smaller card */
+.card-text div div {
+  font-size: 10px;  /* Smaller font for results */
+}
+
+.card-text div div div {
+  font-size: 16px;  /* Confidence number size */
+}

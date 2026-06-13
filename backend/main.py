@@ -5,7 +5,6 @@ import warnings
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 import logging
-
 import joblib
 import pandas as pd
 import requests
@@ -13,17 +12,14 @@ from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import whois  # Added for WHOIS lookups on Render
+import whois 
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
-# Clean terminal and cloud log output
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
